@@ -1,0 +1,95 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  serverless-llm-chat-app
+
+  SAM Template for serverless-llm-chat-app
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Handler: main.lambda_handler
+    Architectures:
+      - arm64
+    Tracing: Active
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+    Layers:
+      - !Sub arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPythonV2-Arm64:51
+
+Resources:
+  CognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+
+  CognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref CognitoUserPool
+      ClientName: !Ref CognitoUserPool
+      GenerateSecret: false
+
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      # Auth:
+      #   DefaultAuthorizer: CognitoAuthorizer
+      #   AddDefaultAuthorizerToCorsPreflight: false
+      #   Authorizers:
+      #     CognitoAuthorizer:
+      #       UserPoolArn: !GetAtt CognitoUserPool.Arn
+      Cors:
+        AllowOrigin: "'*'"
+        AllowHeaders: "'*'"
+        AllowMethods: "'*'"
+
+  GenerateResponseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Timeout: 30
+      MemorySize: 2048
+      Policies:
+        - Statement:
+            - Sid: "BedrockScopedAccess"
+              Effect: "Allow"
+              Action: "bedrock:InvokeModel"
+              Resource:
+                - "arn:aws:bedrock:*::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0"
+      Environment:
+        Variables:
+          ENV: dev
+      Events:
+        Root:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /message
+            Method: POST
+
+Outputs:
+  CognitoUserPool:
+    Value: !Ref CognitoUserPool
+    Description: Cognito User Pool
+  CognitoUserPoolClient:
+    Value: !Ref CognitoUserPoolClient
+    Description: Cognito User Pool Client ID
+  ApiGatewayBaseUrl:
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}/dev/"
